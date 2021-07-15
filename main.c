@@ -3,8 +3,10 @@
 #include <stdlib.h>
 
 #define STB_IMAGE_IMPLEMENTATION
+#include "buffer.h"
 #include "la.h"
 #include "stb_image.h"
+
 void scc(int code) {
   if (code < 0) {
     fprintf(stderr, "SDL ERROR: %s\n", SDL_GetError());
@@ -115,17 +117,15 @@ void render_text(SDL_Renderer *renderer, Font *font, const char *text,
   render_text_sized(renderer, font, text, strlen(text), pos, color, scale);
 }
 
-#define BUFFER_CAPACITY 1024
-char buffer[BUFFER_CAPACITY];
-size_t buffer_cursor = 0;
-size_t buffer_size = 0;
+Line line = {0};
+size_t cursor = 0;
 
 #define UNHEX(color)                                        \
   ((color >> (8 * 3)) & 0xFF), ((color >> (8 * 2)) & 0xFF), \
       ((color >> (8 * 1)) & 0xFF), ((color >> (8 * 0)) & 0xFF)
 
 void render_cursor(SDL_Renderer *renderer, Font *font) {
-  const Vec2f pos = vec2f(buffer_cursor * FONT_CHAR_WIDTH * FONT_SCALE, 0.0f);
+  const Vec2f pos = vec2f(cursor * FONT_CHAR_WIDTH * FONT_SCALE, 0.0f);
   const SDL_Rect rect = {
       .x = (int)pos.x,
       .y = (int)pos.y,
@@ -137,38 +137,8 @@ void render_cursor(SDL_Renderer *renderer, Font *font) {
   scc(SDL_RenderFillRect(renderer, &rect));
 
   set_texture_color(font->spritesheet, 0xFF000000);
-  if (buffer_cursor < buffer_size) {
-    render_char(renderer, font, buffer[buffer_cursor], pos, FONT_SCALE);
-  }
-}
-
-void buffer_insert_text_before_cursor(const char *text) {
-  size_t text_size = strlen(text);
-  const size_t free_space = BUFFER_CAPACITY - buffer_size;
-  if (text_size > free_space) {
-    text_size = free_space;
-  }
-  memmove(buffer + buffer_cursor + text_size, buffer + buffer_cursor,
-          buffer_size - buffer_cursor);
-  memcpy(buffer + buffer_cursor, text, text_size);
-  buffer_cursor += text_size;
-  buffer_size += text_size;
-}
-
-void buffer_delete_before_cursor() {
-  if (buffer_size > 0 && buffer_cursor > 0) {
-    memmove(buffer + buffer_cursor - 1, buffer + buffer_cursor,
-            buffer_size - buffer_cursor);
-    buffer_size -= 1;
-    buffer_cursor -= 1;
-  }
-}
-
-void buffer_delete_beginning_at_cursor() {
-  if (buffer_cursor < buffer_size) {
-    memmove(buffer + buffer_cursor, buffer + buffer_cursor + 1,
-            buffer_size - buffer_cursor - 1);
-    buffer_size -= 1;
+  if (cursor < line.size) {
+    render_char(renderer, font, line.chars[cursor], pos, FONT_SCALE);
   }
 }
 
@@ -196,22 +166,28 @@ int main() {
         case SDL_KEYDOWN: {
           switch (event.key.keysym.sym) {
             case SDLK_BACKSPACE: {
-              buffer_delete_before_cursor();
-              break;
-            }
-            case SDLK_DELETE: {
-              buffer_delete_beginning_at_cursor();
-              break;
-            }
-            case SDLK_LEFT: {
-              if (buffer_cursor > 0) {
-                buffer_cursor -= 1;
+              line_backspace(&line, cursor);
+              if (cursor > 0) {
+                cursor -= 1;
               }
               break;
             }
+
+            case SDLK_DELETE: {
+              line_delete(&line, cursor);
+              break;
+            }
+
+            case SDLK_LEFT: {
+              if (cursor > 0) {
+                cursor -= 1;
+              }
+              break;
+            }
+
             case SDLK_RIGHT: {
-              if (buffer_cursor < buffer_size) {
-                buffer_cursor += 1;
+              if (cursor < line.size) {
+                cursor += 1;
               }
               break;
             }
@@ -219,7 +195,8 @@ int main() {
           break;
         }
         case SDL_TEXTINPUT: {
-          buffer_insert_text_before_cursor(event.text.text);
+          line_insert_text_before_col(&line, event.text.text, cursor);
+          cursor += strlen(event.text.text);
           break;
         }
         case SDL_KEYUP: {
@@ -235,7 +212,7 @@ int main() {
     scc(SDL_SetRenderDrawColor(renderer, 0, 0, 0, 0));
     scc(SDL_RenderClear(renderer));
 
-    render_text_sized(renderer, font, buffer, buffer_size, vec2fs(0.0f),
+    render_text_sized(renderer, font, line.chars, line.size, vec2fs(0.0f),
                       0xFFFFFFFF, FONT_SCALE);
     render_cursor(renderer, font);
 
