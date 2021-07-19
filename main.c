@@ -100,9 +100,11 @@ static const Glyph_Attr_Def glyph_attr_defs[COUNT_GLYPH_ATTRS] = {
 static_assert(COUNT_GLYPH_ATTRS == 4,
               "The amount of glyph vertex attributes have changed");
 
-#define GLYPH_BUFFER_CAP 1024
+#define GLYPH_BUFFER_CAP 1024 * 640
 Glyph glyph_buffer[GLYPH_BUFFER_CAP];
 size_t glyph_buffer_count = 0;
+
+void glyph_buffer_clear() { glyph_buffer_count = 0; }
 
 void glyph_buffer_push(Glyph glyph) {
   assert(glyph_buffer_count < GLYPH_BUFFER_CAP);
@@ -195,6 +197,7 @@ int main(int argc, char **argv) {
   GLuint resolution_uniform = 0;
   GLuint scale_uniform = 0;
   GLuint cursor_uniform = 0;
+  GLuint camera_uniform = 0;
   // Initialize shader program
   {
     GLuint vert_shader = 0;
@@ -219,9 +222,10 @@ int main(int argc, char **argv) {
     resolution_uniform = glGetUniformLocation(program, "resolution");
     scale_uniform = glGetUniformLocation(program, "scale");
     cursor_uniform = glGetUniformLocation(program, "cursor");
+    camera_uniform = glGetUniformLocation(program, "camera");
 
     glUniform2f(resolution_uniform, SCREEN_WIDTH, SCREEN_HEIGHT);
-    glUniform1f(scale_uniform, 3.0f);
+    glUniform1f(scale_uniform, FONT_SCALE);
     glUniform2i(cursor_uniform, 0, 0);
   }
 
@@ -283,14 +287,10 @@ int main(int argc, char **argv) {
     }
   }
 
-  const char *text = "Hello, world";
-  gl_render_text(text, vec2is(0), vec4f(1.0f, 0.0f, 0.0f, 1.0f),
-                 vec4f(0.0f, 0.0f, 1.0f, 1.0f));
-  glyph_buffer_sync();
-
   Vec2i cursor = vec2is(0);
   bool quit = false;
   while (!quit) {
+    const Uint32 start = SDL_GetTicks();
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
       switch (event.type) {
@@ -361,16 +361,39 @@ int main(int argc, char **argv) {
           }
         } break;
       }
+    }
+    {
+      const Vec2f cursor_pos = vec2f(
+          (float)editor.cursor_col * FONT_CHAR_WIDTH * FONT_SCALE,
+          (float)(-(int)editor.cursor_row) * FONT_CHAR_HEIGHT * FONT_SCALE);
+      camera_vel = vec2f_mul(vec2f_sub(cursor_pos, camera_pos), vec2fs(2.0f));
+      camera_pos =
+          vec2f_add(camera_pos, vec2f_mul(camera_vel, vec2fs(DELTA_TIME)));
+    }
 
-      glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-      glClear(GL_COLOR_BUFFER_BIT);
-      glUniform1f(time_uniform, (float)SDL_GetTicks() / 1000.0f);
-      glUniform2i(cursor_uniform, cursor.x, cursor.y);
+    glyph_buffer_clear();
+    for (size_t row = 0; row < editor.size; ++row) {
+      const Line *line = editor.lines + row;
+      gl_render_text_sized(line->chars, line->size, vec2i(0, -row),
+                           vec4fs(1.0f), vec4fs(0.0f));
+    }
+    glyph_buffer_sync();
 
-      glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, glyph_buffer_count);
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glUniform1f(time_uniform, (float)SDL_GetTicks() / 1000.0f);
+    glUniform2f(camera_uniform, camera_pos.x, camera_pos.y);
+    glUniform2i(cursor_uniform, cursor.x, cursor.y);
 
-      /* glDrawArrays(GL_TRIANGLE_STRIP, 0, 4); */
-      SDL_GL_SwapWindow(window);
+    glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, glyph_buffer_count);
+
+    /* glDrawArrays(GL_TRIANGLE_STRIP, 0, 4); */
+    SDL_GL_SwapWindow(window);
+
+    const Uint32 duration = SDL_GetTicks() - start;
+    const Uint32 delta_time_ms = 1000 / FPS;
+    if (duration < delta_time_ms) {
+      SDL_Delay(delta_time_ms - duration);
     }
   }
   return 0;

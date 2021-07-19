@@ -8,6 +8,7 @@
 
 uniform vec2 resolution;
 uniform float scale;
+uniform vec2 camera;
 
 layout(location = 0) in ivec2 tile;
 layout(location = 1) in int ch;
@@ -19,7 +20,7 @@ flat out int glyph_ch;
 out vec4 glyph_fg_color;
 out vec4 glyph_bg_color;
 
-vec2 project_point(vec2 p) { return 2.0 * p / resolution; }
+vec2 project_point(vec2 p) { return 2.0 * (p - camera) / resolution; }
 
 void main() {
   uv = vec2(float(gl_VertexID & 1), float((gl_VertexID >> 1) & 1));
