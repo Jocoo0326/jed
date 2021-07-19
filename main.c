@@ -1,3 +1,4 @@
+#include <GL/glew.h>
 #include <SDL2/SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -62,23 +63,23 @@ typedef struct {
 } Font;
 
 Font *font_load_from_file(SDL_Renderer *renderer, const char *path) {
-  Font *font = (Font *)malloc(sizeof(Font));
+  Font *shfont = (Font *)malloc(sizeof(Font));
   SDL_Surface *s = surface_from_file(path);
   scc(SDL_SetColorKey(s, SDL_TRUE, 0xFF000000));
-  font->spritesheet = scp(SDL_CreateTextureFromSurface(renderer, s));
+  shfont->spritesheet = scp(SDL_CreateTextureFromSurface(renderer, s));
   SDL_FreeSurface(s);
   for (size_t i = ASCII_DISPLAY_LOW; i < ASCII_DISPLAY_HIGH; ++i) {
     const size_t index = i - ASCII_DISPLAY_LOW;
     const size_t row = index / FONT_COLS;
     const size_t col = index % FONT_COLS;
 
-    font->glyph_table[index].x = (col * FONT_CHAR_WIDTH);
-    font->glyph_table[index].y = (row * FONT_CHAR_HEIGHT);
-    font->glyph_table[index].w = FONT_CHAR_WIDTH;
-    font->glyph_table[index].h = FONT_CHAR_HEIGHT;
+    shfont->glyph_table[index].x = (col * FONT_CHAR_WIDTH);
+    shfont->glyph_table[index].y = (row * FONT_CHAR_HEIGHT);
+    shfont->glyph_table[index].w = FONT_CHAR_WIDTH;
+    shfont->glyph_table[index].h = FONT_CHAR_HEIGHT;
   }
 
-  return font;
+  return shfont;
 }
 
 void set_texture_color(SDL_Texture *texture, Uint32 color) {
@@ -88,7 +89,7 @@ void set_texture_color(SDL_Texture *texture, Uint32 color) {
                              (color >> (8 * 0)) & 0xFF));
 }
 
-void render_char(SDL_Renderer *renderer, Font *font, const char c, Vec2f pos,
+void render_char(SDL_Renderer *renderer, Font *shfont, const char c, Vec2f pos,
                  float scale) {
   const size_t index = c - 0x20;
 
@@ -96,25 +97,25 @@ void render_char(SDL_Renderer *renderer, Font *font, const char c, Vec2f pos,
                   .y = pos.y,
                   .w = floorf(FONT_CHAR_WIDTH * scale),
                   .h = floorf(FONT_CHAR_HEIGHT * scale)};
-  scc(SDL_RenderCopy(renderer, font->spritesheet, font->glyph_table + index,
+  scc(SDL_RenderCopy(renderer, shfont->spritesheet, shfont->glyph_table + index,
                      &dst));
 }
 
-void render_text_sized(SDL_Renderer *renderer, Font *font, const char *text,
+void render_text_sized(SDL_Renderer *renderer, Font *shfont, const char *text,
                        size_t text_size, Vec2f pos, Uint32 color, float scale) {
-  set_texture_color(font->spritesheet, color);
+  set_texture_color(shfont->spritesheet, color);
 
   Vec2f offset = pos;
 
   for (size_t i = 0; i < text_size; ++i) {
-    render_char(renderer, font, text[i], offset, scale);
+    render_char(renderer, shfont, text[i], offset, scale);
     offset.x += FONT_CHAR_WIDTH * scale;
   }
 }
 
-void render_text(SDL_Renderer *renderer, Font *font, const char *text,
+void render_text(SDL_Renderer *renderer, Font *shfont, const char *text,
                  Vec2f pos, Uint32 color, float scale) {
-  render_text_sized(renderer, font, text, strlen(text), pos, color, scale);
+  render_text_sized(renderer, shfont, text, strlen(text), pos, color, scale);
 }
 
 Line line = {0};
@@ -136,13 +137,14 @@ void render_cursor(SDL_Renderer *renderer, Font *font) {
   scc(SDL_SetRenderDrawColor(renderer, UNHEX(0xFFFFFFFF)));
   scc(SDL_RenderFillRect(renderer, &rect));
 
+
   set_texture_color(font->spritesheet, 0xFF000000);
   if (cursor < line.size) {
     render_char(renderer, font, line.chars[cursor], pos, FONT_SCALE);
   }
 }
 
-int main() {
+int main1() {
   scc(SDL_Init(SDL_INIT_VIDEO));
 
   SDL_Window *window =
@@ -151,7 +153,7 @@ int main() {
   SDL_Renderer *renderer =
       scp(SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED));
 
-  Font *font = font_load_from_file(renderer, "./charmap-oldschool_white.png");
+  Font *shfont = font_load_from_file(renderer, "./charmap-oldschool_white.png");
 
   int quit = 0;
   while (!quit) {
@@ -214,10 +216,226 @@ int main() {
 
     render_text_sized(renderer, font, line.chars, line.size, vec2fs(0.0f),
                       0xFFFFFFFF, FONT_SCALE);
-    render_cursor(renderer, font);
+    render_cursor(renderer, shfont);
 
     SDL_RenderPresent(renderer);
   }
   SDL_Quit();
+  return 0;
+}
+
+#define SCREEN_WIDTH 800
+#define SCREEN_HEIGHT 600
+
+void MessageCallback(GLenum source, GLenum type, GLuint id, GLenum severity,
+                     GLsizei length, const GLchar *message,
+                     const void *userParam) {
+  (void)source;
+  (void)id;
+  (void)length;
+  (void)userParam;
+  fprintf(stderr,
+          "GL CALLBACK: %s type = 0x%x, severity = 0x%x, message = %s\n",
+          (type == GL_DEBUG_TYPE_ERROR ? "** GL ERROR **" : ""), type, severity,
+          message);
+}
+
+#include "gl_extra.h"
+
+typedef struct {
+  Vec2f pos;
+  float scale;
+  int ch;
+  Vec4f color;
+} Glyph;
+
+typedef enum {
+  GLYPH_ATTR_POS = 0,
+  GLYPH_ATTR_SCALE,
+  GLYPH_ATTR_CH,
+  GLYPH_ATTR_COLOR,
+  COUNT_GLYPH_ATTRS
+} Glyph_Attr;
+
+typedef struct {
+  size_t offset;
+  size_t comps;
+} Glyph_Attr_Def;
+
+static const Glyph_Attr_Def glyph_attr_defs[COUNT_GLYPH_ATTRS] = {
+    [GLYPH_ATTR_POS] = {.offset = offsetof(Glyph, pos), .comps = 2},
+    [GLYPH_ATTR_SCALE] = {.offset = offsetof(Glyph, scale), .comps = 1},
+    [GLYPH_ATTR_CH] = {.offset = offsetof(Glyph, ch), .comps = 1},
+    [GLYPH_ATTR_COLOR] = {.offset = offsetof(Glyph, color), .comps = 4},
+};
+static_assert(COUNT_GLYPH_ATTRS == 4,
+              "The amount of glyph vertex attributes have changed");
+
+#define GLYPH_BUFFER_CAP 1024
+Glyph glyph_buffer[GLYPH_BUFFER_CAP];
+size_t glyph_buffer_count = 0;
+
+void glyph_buffer_push(Glyph glyph) {
+  assert(glyph_buffer_count < GLYPH_BUFFER_CAP);
+  glyph_buffer[glyph_buffer_count++] = glyph;
+}
+
+void glyph_buffer_sync(void) {
+  glBufferSubData(GL_ARRAY_BUFFER, 0, glyph_buffer_count * sizeof(Glyph),
+                  glyph_buffer);
+}
+
+void gl_render_text(const char *text, size_t text_size, Vec2f pos, float scale,
+                    Vec4f color) {
+  const Vec2f char_size = vec2f(FONT_CHAR_WIDTH, FONT_CHAR_HEIGHT);
+  for (size_t i = 0; i < text_size; ++i) {
+    Glyph glyph = {
+        .pos = vec2f_add(
+            pos, vec2f_mul3(char_size, vec2f((float)i, 0.0f), vec2fs(scale))),
+        .scale = scale,
+        .ch = text[i],
+        .color = color};
+    glyph_buffer_push(glyph);
+  }
+}
+
+int main(void) {
+  scc(SDL_Init(SDL_INIT_VIDEO));
+
+  SDL_Window *window =
+      scp(SDL_CreateWindow("jed", 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT,
+                           SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE));
+  {
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK,
+                        SDL_GL_CONTEXT_PROFILE_CORE);
+
+    int major, minor;
+    SDL_GL_GetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, &major);
+    SDL_GL_GetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, &minor);
+    printf("GL Version %d.%d\n", major, minor);
+  }
+
+  scp(SDL_GL_CreateContext(window));
+
+  if (GLEW_OK != glewInit()) {
+    fprintf(stderr, "Could not initialize GLEW!");
+    exit(EXIT_FAILURE);
+  }
+
+  glEnable(GL_BLEND);
+  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+  if (GLEW_ARB_debug_output) {
+    glEnable(GL_DEBUG_OUTPUT);
+    glDebugMessageCallback(MessageCallback, 0);
+  }
+
+  GLuint time_uniform = 0;
+  GLuint resolution_uniform = 0;
+  // Initialize shader program
+  {
+    GLuint vert_shader = 0;
+    if (!compile_shader_file("./shaders/font.vert", GL_VERTEX_SHADER,
+                             &vert_shader)) {
+      exit(1);
+    }
+    GLuint frag_shader = 0;
+    if (!compile_shader_file("./shaders/font.frag", GL_FRAGMENT_SHADER,
+                             &frag_shader)) {
+      exit(1);
+    }
+
+    GLuint program = 0;
+    if (!link_program(vert_shader, frag_shader, &program)) {
+      exit(1);
+    }
+
+    glUseProgram(program);
+
+    time_uniform = glGetUniformLocation(program, "time");
+    resolution_uniform = glGetUniformLocation(program, "resolution");
+    glUniform2f(resolution_uniform, SCREEN_WIDTH, SCREEN_HEIGHT);
+  }
+
+  // Initialize font texture
+  {
+    int width, height, n;
+    const char *file_path = "./charmap-oldschool_white.png";
+    unsigned char *pixels =
+        stbi_load(file_path, &width, &height, &n, STBI_rgb_alpha);
+    if (pixels == NULL) {
+      fprintf(stderr, "ERROR: could not load image %s: %s\n", file_path,
+              stbi_failure_reason());
+      exit(1);
+    }
+
+    glActiveTexture(GL_TEXTURE0);
+
+    GLuint font_texture = 0;
+    glGenTextures(1, &font_texture);
+    glBindTexture(GL_TEXTURE_2D, font_texture);
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA,
+                 GL_UNSIGNED_BYTE, pixels);
+  }
+
+  // Initialize buffers
+  {
+    GLuint vao = 0;
+    glGenVertexArrays(1, &vao);
+    glBindVertexArray(vao);
+
+    GLuint vbo = 0;
+    glGenBuffers(1, &vbo);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(glyph_buffer), glyph_buffer,
+                 GL_DYNAMIC_DRAW);
+
+    for (Glyph_Attr attr = 0; attr < COUNT_GLYPH_ATTRS; ++attr) {
+      glEnableVertexAttribArray(attr);
+      glVertexAttribPointer(attr, glyph_attr_defs[attr].comps, GL_FLOAT,
+                            GL_FALSE, sizeof(Glyph),
+                            (void *)glyph_attr_defs[attr].offset);
+      glVertexAttribDivisor(attr, 1);
+    }
+  }
+
+  const char *text = "Hello, world";
+  gl_render_text(text, strlen(text), vec2fs(0.0f), 5.0f,
+                 vec4f(1.0f, 0.0f, 0.0f, 1.0f));
+  glyph_buffer_sync();
+
+  bool quit = false;
+  while (!quit) {
+    SDL_Event event;
+    while (SDL_PollEvent(&event)) {
+      switch (event.type) {
+        case SDL_QUIT: {
+          quit = true;
+        } break;
+
+        case SDL_KEYUP: {
+          if (event.key.keysym.sym == SDLK_ESCAPE) {
+            quit = true;
+          }
+        } break;
+      }
+    }
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glUniform1f(time_uniform, (float)SDL_GetTicks() / 1000.0f);
+
+    glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, glyph_buffer_count);
+
+    /* glDrawArrays(GL_TRIANGLE_STRIP, 0, 4); */
+    SDL_GL_SwapWindow(window);
+  }
   return 0;
 }
