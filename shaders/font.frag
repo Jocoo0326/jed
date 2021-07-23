@@ -1,21 +1,13 @@
 #version 330 core
 
-#define FONT_WIDTH 128
-#define FONT_HEIGHT 64
-#define FONT_ROWS 7
-#define FONT_COLS 18
-#define FONT_CHAR_WIDTH (FONT_WIDTH / FONT_COLS)
-#define FONT_CHAR_HEIGHT (FONT_HEIGHT / FONT_ROWS)
-// precision concern
-#define FONT_CHAR_WIDTH_UV (float(FONT_CHAR_WIDTH) / float(FONT_WIDTH))
-#define FONT_CHAR_HEIGHT_UV (float(FONT_CHAR_HEIGHT) / float(FONT_HEIGHT))
-
 uniform sampler2D font;
 uniform float time;
 uniform vec2 resolution;
+uniform float scale;
 
 in vec2 uv;
-flat in int glyph_ch;
+in vec2 glyph_uv_pos;
+in vec2 glyph_uv_size;
 in vec4 glyph_fg_color;
 in vec4 glyph_bg_color;
 
@@ -26,24 +18,13 @@ vec3 hsl2rgb(vec3 c) {
 }
 
 void main() {
-  int ch = glyph_ch;
-  if (!(ch >= 32 && ch <= 127)) {
-    ch = 63;
-  }
 
-  int index = ch - 32;
+  vec2 t = glyph_uv_pos + glyph_uv_size * uv;
 
-  float x = float(index % FONT_COLS) * FONT_CHAR_WIDTH_UV;
-  float y = float(index / FONT_COLS) * FONT_CHAR_HEIGHT_UV;
-
-  vec2 pos = vec2(x, y + FONT_CHAR_HEIGHT_UV);
-  vec2 size = vec2(FONT_CHAR_WIDTH_UV, -FONT_CHAR_HEIGHT_UV);
-  vec2 t = pos + size * uv;
-
-  vec4 tc = texture(font, t);
+  vec4 tc = texture(font, t).rrra;
   vec2 frag_uv = gl_FragCoord.xy / resolution;
   vec4 rainbow =
       vec4(hsl2rgb(vec3((time - frag_uv.x + frag_uv.y) * 0.55, 0.5, 0.5)), 1.0);
-  gl_FragColor =
-      glyph_bg_color * (1.0 - tc.x) + tc.x * glyph_fg_color * rainbow;
+  // gl_FragColor = tc;
+      gl_FragColor = glyph_bg_color * (1.0 - tc.r) + tc.r * glyph_fg_color * rainbow;
 }
