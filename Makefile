@@ -1,3 +1,4 @@
+CC=clang
 PKGS=sdl2 freetype2 glew
 CFLAGS=-Wall -Wextra -pedantic -ggdb
 LIBS=-lm
